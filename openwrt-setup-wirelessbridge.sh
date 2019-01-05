@@ -58,7 +58,7 @@ connectInternetViaWifi(){
 	#
     echo -n "Automatically determining primary channel ..."
     channel="xxx"
-    channel=`iw dev wlan0 scan | grep "SSID\|primary channel" | grep -A 1 VZAP| grep channel| awk '{print $NF}'`
+    channel=`iw dev wlan0 scan | grep "SSID\|primary channel" | grep -A 1 "$SSID"| grep channel| awk '{print $NF}'`
     lastCommandResult "determinging channel $channel"
     #
 	echo -n "Create network for internet (wan) access ..."
@@ -279,7 +279,7 @@ restartAllSystems(){
 
 usage(){
 cat<<EOU
-Usage: $0  [--run | --full-help]
+Usage: $0  [--help | --run [stage] | --full-help | --info | --minimize]
 
 Sets up an openwrt-compatible router as a wireless bridge
 
@@ -435,6 +435,10 @@ main(){
 			;;
         --full-help) info ; return 0;;
 		--info) info | sed -n '/^SCR/,/^TOP/p' | grep -v TOP; cat $0| sed -n '/^#bsteps/,/^#esteps/p' | grep -v "steps"; return 0;;
+        --min*) cat $0 | grep -v '#' | sed -n '/^setupSystem/,/^main/p'|grep -v '()\|lastCommandResult\|^}'| grep -v "^$" | sed 's@echo -n@echo@g' |sed 's@&& \\$@@g'| sed 's@;}@@g' | sed 's@{ @@g' | sed 's@^[[:space:]]*\(.\)@\1@g' | grep -v US | sed -n '1,/^\$rboot/p'| grep -v determineBridgeIP > $0-minimized ;
+            echo "Created $0-minimized"
+            echo "WARNING:: EXPERIMENTAL! :: Fix manually : test hotplug lines (aprox. 111-116) by appending '&& \' at end of each line (except last)";
+            return 0 ;;
 		*) usage $0 ; return 0;;
 	esac
     while [ $STEP -ge 0 ] ; do
