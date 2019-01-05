@@ -3,12 +3,12 @@ uci set system.@system[0].hostname='OpenWrt'
 uci set system.@system[0].zonename='America/Toronto' 
 uci set system.@system[0].timezone='EST5EDT,M3.2.0,M11.1.0' 
 uci commit system
-	
+
 echo "Enabling radio0 ..."
 uci set wireless.radio0.disabled='0'
 wifi
 uci commit wireless
- 
+
 echo "Enter SSID of wifi you want to connect to internet through. Use quotation marks if the name includes white spaces:"
 read rawSSID
 SSID="`echo "$rawSSID"| sed 's@^"\|^\\047@@g' | sed 's@"$\|\\047$@@g'`"
@@ -24,7 +24,7 @@ case $country in
 esac
 echo "Automatically determining primary channel ..."
 channel="xxx"
-channel=`iw dev wlan0 scan | grep "SSID\|primary channel" | grep -A 1 VZAP| grep channel| awk '{print $NF}'`
+channel=`iw dev wlan0 scan | grep "SSID\|primary channel" | grep -A 1 "$SSID"| grep channel| awk '{print $NF}'`
 echo "Create network for internet (wan) access ..."
 uci set network.wwan=interface 
 uci set network.wwan.proto='dhcp' 
@@ -72,7 +72,7 @@ uci set network.lan.gateway=$defaultGwIP
 uci set network.lan.dns=$defaultGwIP 
 echo "Committing network relay and lan gw Ip and dns configuration ..."
 uci commit network
- 
+
 echo "Disabling DHCP from LAN and setting IPv6 to relay ..."
 uci set dhcp.lan.ignore=1
 uci set dhcp.lan.ra=relay 
