@@ -1,0 +1,80 @@
+SSID=""
+wifiPASSWD=""
+countr="CA"
+relayIF="wirelessBridge" 
+uci set system.@system[0].hostname='OpenWrt'  
+uci set system.@system[0].zonename='America/Toronto' 
+uci set system.@system[0].timezone='EST5EDT,M3.2.0,M11.1.0' 
+uci commit system
+uci set wireless.radio0.disabled='0'
+wifi
+uci commit wireless
+channel=`iw dev wlan0 scan | grep "SSID\|primary channel" | grep -A 1 "$SSID"| grep channel| awk '{print $NF}'`
+uci set network.wwan=interface 
+uci set network.wwan.proto='dhcp' 
+uci commit network
+uci set wireless.radio0.channel=$channel 
+uci set wireless.radio0.country=$country 
+uci set wireless.@wifi-iface[0].network='wwan' 
+uci set wireless.@wifi-iface[0].mode=sta 
+uci set wireless.@wifi-iface[0].encryption=psk2 
+uci set wireless.@wifi-iface[0].ssid="$SSID" 
+uci set wireless.@wifi-iface[0].key="$wifiPASSWD" 
+uci commit wireless 
+ifup wwan 
+wifi 
+sleep 10 && ping -c 4 8.8.8.8
+opkg update
+opkg install relayd
+opkg install luci-ssl 
+opkg install ipset
+uci delete uhttpd.main.listen_http 
+uci commit 
+opkg install luci-proto-relay 
+/etc/init.d/relayd enable
+uci set network.${relayIF}=interface 
+uci set network.${relayIF}.proto=relay 
+uci set network.${relayIF}.network="lan wwan" 
+defaultGwIP=`route -n|grep UG| awk '{print $2}'` 
+uci set network.lan.gateway=$defaultGwIP 
+uci set network.lan.dns=$defaultGwIP 
+uci commit network
+uci set dhcp.lan.ignore=1
+uci set dhcp.lan.ra=relay 
+uci set dhcp.lan.ndp=relay 
+uci set dhcp.lan.dhcpv6=relay 
+uci commit dhcp
+uci set firewall.@zone[0].forward=ACCEPT 
+uci set firewall.@zone[0].network="lan wwan" 
+uci commit firewall 
+uci add wireless wifi-iface 
+uci set wireless.@wifi-iface[1].device=radio0 
+uci set wireless.@wifi-iface[1].network=lan 
+uci set wireless.@wifi-iface[1].mode=ap 
+uci set wireless.@wifi-iface[1].ssid=RepeaterWirelessNetwork 
+uci set wireless.@wifi-iface[1].encryption=psk2 
+uci set wireless.@wifi-iface[1].key=RepeaterWirelessPassword 
+uci commit wireless 
+ip_wwan="x.x.x.x"
+. /lib/functions/network.sh 
+network_get_ipaddr ip_wwan wwan 
+hotplugPath=/etc/hotplug.d/iface
+hotplugFnum=30
+hotplugFn=${hotplugPath}/${hotplugFnum}-relay
+test -e $hotplugFn  && \
+hotplugFnum=69  && \
+hotplugFn=${hotplugPath}/${hotplugFnum}-relay  && \
+test -e $hotplugFn  && \
+cat<<EOS > $hotplugFn
+[ "\$INTERFACE" = wwan ] || exit 0
+[ "\$ACTION" = ifup -o "\$ACTION" = ifupdate ] || exit 0
+. /lib/functions/network.sh; network_get_ipaddr ip wwan;
+uci set network.${relayIF}.ipaddr=\$ip
+uci commit network
+EOS
+uci set network.lan.ipaddr=$lanet 
+uci commit network 
+/etc/init.d/dnsmasq restart 
+/etc/init.d/firewall restart 
+wifi down ; wifi
+reboot
