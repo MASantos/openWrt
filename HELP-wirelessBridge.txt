@@ -1,0 +1,37 @@
+Usage: ./openwrt-setup-wirelessbridge.sh  [-h | --run | --full-help]
+
+Sets up an openwrt-compatible router as a wireless bridge
+
+This script requires user intervention.
+
+Setup Stages:
+
+            0) setupSystem ; connectInternetViaWifi ;;
+	        1) installRelayPkgs ;;
+	        2) setupRelayInterface ;;
+	        3) disableDHCP ;;
+	        4) setupLANFirewall ;;
+	        5) optionalCreateWifiNetworkForRepeating ;;
+	        6) setupClientAndBridgeNetworkIP ;;
+	        7) restartAllSystems ;;
+
+EXAMPLES:
+ 1) run all stages from the first one on
+        ./openwrt-setup-wirelessbridge.sh --run
+            alternatively:
+        ./openwrt-setup-wirelessbridge.sh --run connect
+        ./openwrt-setup-wirelessbridge.sh --run internet
+        ./openwrt-setup-wirelessbridge.sh --run system
+    
+ 2) run all stages starting from 3 on
+        ./openwrt-setup-wirelessbridge.sh --run dhcp
+            alternatively:
+        ./openwrt-setup-wirelessbridge.sh --run disable
+        ./openwrt-setup-wirelessbridge.sh --run DHCP
+
+ 3) run just last stage to restart all systems and reboot router
+        ./openwrt-setup-wirelessbridge.sh --run restart
+            alternatively:
+        ./openwrt-setup-wirelessbridge.sh --run finish
+        ./openwrt-setup-wirelessbridge.sh --run reboot
+
