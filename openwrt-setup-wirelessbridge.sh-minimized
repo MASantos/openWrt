@@ -1,0 +1,141 @@
+echo "Setting up hostname & timezone to OpenWrt & America/Toronto"
+uci set system.@system[0].hostname='OpenWrt'  
+uci set system.@system[0].zonename='America/Toronto' 
+uci set system.@system[0].timezone='EST5EDT,M3.2.0,M11.1.0' 
+uci commit system
+	
+echo "Enabling radio0 ..."
+uci set wireless.radio0.disabled='0'
+wifi
+uci commit wireless
+ 
+echo "Enter SSID of wifi you want to connect to internet through. Use quotation marks if the name includes white spaces:"
+read rawSSID
+SSID="`echo "$rawSSID"| sed 's@^"\|^\\047@@g' | sed 's@"$\|\\047$@@g'`"
+echo "Enter passphrase for wifi. Just press enter if none. Use quotation marks if the passphrase includes white spaces:"
+read rawWifiPASSWD
+wifiPASSWD="`echo "$rawWifiPASSWD"| sed 's@^"\|^\\047@@g' | sed 's@"$\|\\047$@@g'`"
+echo "1) Canada"
+read country
+echo "...$country"
+case $country in
+1) country="CA" ;;
+*) echo "ERROR: unrecognized country" ; exit ;;
+esac
+echo "Automatically determining primary channel ..."
+channel="xxx"
+channel=`iw dev wlan0 scan | grep "SSID\|primary channel" | grep -A 1 VZAP| grep channel| awk '{print $NF}'`
+echo "Create network for internet (wan) access ..."
+uci set network.wwan=interface 
+uci set network.wwan.proto='dhcp' 
+uci commit network
+echo "Setting up internet access via wifi ..."
+uci set wireless.radio0.channel=$channel 
+uci set wireless.radio0.country=$country 
+uci set wireless.@wifi-iface[0].network='wwan' 
+uci set wireless.@wifi-iface[0].mode=sta 
+uci set wireless.@wifi-iface[0].encryption=psk2 
+uci set wireless.@wifi-iface[0].ssid="$SSID" 
+uci set wireless.@wifi-iface[0].key="$wifiPASSWD" 
+uci commit wireless 
+echo "Restarting wifi ..."
+ifup wwan 
+wifi 
+echo "Testing IP assigned (may take a little: waiting 10 sec for AP to assign IP) ..."
+sleep 10 && ping -c 4 8.8.8.8
+echo "Updating list of packages..."
+opkg update
+echo "installing relayd"
+opkg install relayd
+echo "installing luci-ssl for https access"
+opkg install luci-ssl 
+echo "installing ipset ..."
+opkg install ipset
+echo "Disabling http access. Only encrypted HTTPS or ssh (if already set) will be possible"
+uci delete uhttpd.main.listen_http 
+uci commit 
+echo "Do you want to install luci (GUI) support (luci-proto-relay) for relay config? [Y/n] "
+read wantlucirelay
+case $wantlucirelay in
+n*|N*) echo " ... no" ;;
+*) opkg install luci-proto-relay 
+esac
+echo "Enabling relayd ..."
+/etc/init.d/relayd enable
+relayIF="wirelessBridge" 
+echo "Declaring relay interface $relayIF ..."
+uci set network.${relayIF}=interface 
+uci set network.${relayIF}.proto=relay 
+uci set network.${relayIF}.network="lan wwan" 
+defaultGwIP=`route -n|grep UG| awk '{print $2}'` 
+uci set network.lan.gateway=$defaultGwIP 
+uci set network.lan.dns=$defaultGwIP 
+echo "Committing network relay and lan gw Ip and dns configuration ..."
+uci commit network
+ 
+echo "Disabling DHCP from LAN and setting IPv6 to relay ..."
+uci set dhcp.lan.ignore=1
+uci set dhcp.lan.ra=relay 
+uci set dhcp.lan.ndp=relay 
+uci set dhcp.lan.dhcpv6=relay 
+echo "Committing dhcp config ..."
+uci commit dhcp
+echo "Setting up LAN firewall to accept ..."
+uci set firewall.@zone[0].forward=ACCEPT 
+uci set firewall.@zone[0].network="lan wwan" 
+uci commit firewall 
+echo "Do you want to create optional Wireless network for repeating(bridging) as well? [y/N] "
+read wantwifirepeat
+case $wantwifirepeat in
+y*|Y*) echo " ... yes";;
+*) echo " ... no" ; return 0;;
+esac
+echo "Enabling wifi network for relaying ..."
+uci add wireless wifi-iface 
+uci set wireless.@wifi-iface[1].device=radio0 
+uci set wireless.@wifi-iface[1].network=lan 
+uci set wireless.@wifi-iface[1].mode=ap 
+uci set wireless.@wifi-iface[1].ssid=RepeaterWirelessNetwork 
+uci set wireless.@wifi-iface[1].encryption=psk2 
+uci set wireless.@wifi-iface[1].key=RepeaterWirelessPassword 
+uci commit wireless 
+ip_wwan="x.x.x.x"
+echo "Determining bridge network IP ..."
+. /lib/functions/network.sh 
+network_get_ipaddr ip_wwan wwan 
+echo $ip_wwan 
+echo "Router WWAN IP : $ip_wwan"
+hotplugPath=/etc/hotplug.d/iface
+hotplugFnum=30
+hotplugFn=${hotplugPath}/${hotplugFnum}-relay
+test -e $hotplugFn  && \
+echo "WARNING file $hotplugFn already exists. Will try to fix automatically ..." && \ 
+hotplugFnum=69  && \
+hotplugFn=${hotplugPath}/${hotplugFnum}-relay  && \
+test -e $hotplugFn  && \
+echo -e "\nFATAL ERROR: fixing filename to $hotplugFn didn't work" && return 1 
+echo "Enabling automatic access from client network ..."
+cat<<EOS > $hotplugFn
+[ "\$INTERFACE" = wwan ] || exit 0
+[ "\$ACTION" = ifup -o "\$ACTION" = ifupdate ] || exit 0
+. /lib/functions/network.sh; network_get_ipaddr ip wwan;
+uci set network.${relayIF}.ipaddr=\$ip
+uci commit network
+EOS
+echo "Making sure the lan interface on this router is in another subnet than your main network ..."
+lanet=`echo $ip_wwan | awk -F '.' '{s=100;if( $3>s){$3-=s}else{$3+=s};printf("%d.%d.%d.%d\n",$1,$2,$3,$4)}'`
+uci set network.lan.ipaddr=$lanet 
+uci commit network 
+echo "Restart dnsmasq, firewall & wifi ..."
+/etc/init.d/dnsmasq restart 
+/etc/init.d/firewall restart 
+echo "System ready for reboot. Access this router through new WWAN IP: $ip_wwan"
+echo "Reboot needed. If you choose not to reboot now, most likely you will lose your ssh connection... Hard reboot your router then."
+echo "Proceed manually if you answer here no. Reboot now? [Y/n] "
+read rboot
+case $rboot in
+n*|N*) rboot="true"; echo "NO. Do it manually then. Most likely you will lose your ssh connection now...Hard reboot your router then.";;
+*) echo " yes. Rebooting router now."; rboot="reboot" ;;
+esac
+wifi down ; wifi
+$rboot 
